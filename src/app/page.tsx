@@ -27,7 +27,7 @@ const OBSTACLE_WIDTH = 80;
 const OBSTACLE_GAP_BASE = 200;
 const OBSTACLE_SPEED = 4;
 const BIRD_X_POSITION = 150;
-const MOUTH_OPEN_THRESHOLD = 0.4;
+const SMILE_THRESHOLD = 0.6;
 
 type Obstacle = {
   x: number;
@@ -128,11 +128,11 @@ export default function SoarScapePage() {
     const results = faceLandmarker.detectForVideo(video, Date.now());
 
     if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
-      const mouthOpenAmount = results.faceBlendshapes[0].categories.find(
-        (shape) => shape.categoryName === 'mouthOpen'
-      )?.score;
+      const blendshapes = results.faceBlendshapes[0].categories;
+      const smileLeft = blendshapes.find((shape) => shape.categoryName === 'mouthSmileLeft')?.score ?? 0;
+      const smileRight = blendshapes.find((shape) => shape.categoryName === 'mouthSmileRight')?.score ?? 0;
 
-      if (mouthOpenAmount && mouthOpenAmount > MOUTH_OPEN_THRESHOLD) {
+      if (smileLeft > SMILE_THRESHOLD || smileRight > SMILE_THRESHOLD) {
         handleJump();
       }
     }
@@ -369,7 +369,7 @@ export default function SoarScapePage() {
                 control={form.control} name="style"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Visual Style</FormLabel>
+                    <FormLabel>Visual Style</FormLabel>.
                     <FormControl><Input placeholder="e.g., futuristic, fantasy, cartoon" {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
