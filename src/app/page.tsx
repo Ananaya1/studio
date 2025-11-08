@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
+import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+import Webcam from 'react-webcam';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -14,6 +16,8 @@ import { Loader2 } from 'lucide-react';
 import { generateLevel } from '@/ai/flows/generate-level';
 import type { GenerateLevelOutput } from '@/ai/flows/generate-level';
 import { BirdIcon } from '@/components/icons/BirdIcon';
+import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 // Game constants
 const BIRD_SIZE = 40;
@@ -23,6 +27,7 @@ const OBSTACLE_WIDTH = 80;
 const OBSTACLE_GAP_BASE = 200;
 const OBSTACLE_SPEED = 4;
 const BIRD_X_POSITION = 150;
+const MOUTH_OPEN_THRESHOLD = 0.4;
 
 type Obstacle = {
   x: number;
@@ -38,8 +43,8 @@ type GameState = 'start' | 'playing' | 'gameOver';
 
 const formSchema = z.object({
   difficulty: z.enum(['easy', 'medium', 'hard']),
-  style: z.string().min(2, "Style must be at least 2 characters."),
-  theme: z.string().min(2, "Theme must be at least 2 characters."),
+  style: z.string().min(2, 'Style must be at least 2 characters.'),
+  theme: z.string().min(2, 'Theme must be at least 2 characters.'),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -51,11 +56,16 @@ export default function SoarScapePage() {
   const [obstacles, setObstacles] = useState<Obstacle[]>([]);
   const [score, setScore] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
-  
+  const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | undefined>(undefined);
+
   const gameLoopRef = useRef<number>();
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const levelDataRef = useRef<LevelData>({ obstacles: [] });
   const obstacleCursorRef = useRef(0);
+  const webcamRef = useRef<Webcam>(null);
+  const lastVideoTimeRef = useRef(-1);
+  const { toast } = useToast();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -66,83 +76,166 @@ export default function SoarScapePage() {
     },
   });
 
-  const resetGame = useCallback((layout: GenerateLevelOutput | null) => {
-    const height = gameContainerRef.current?.clientHeight || window.innerHeight;
-    const width = gameContainerRef.current?.clientWidth || window.innerWidth;
-    
-    setGameState('playing');
-    setBirdPosition(height / 2);
-    setBirdVelocity(0);
-    setScore(0);
-    
-    levelDataRef.current = { obstacles: [] };
-    obstacleCursorRef.current = 0;
-    
-    if (layout) {
+  useEffect(() => {
+    const createFaceLandmarker = async () => {
       try {
-        const parsedLayout = JSON.parse(layout.levelLayout);
-        if (parsedLayout.obstacles && Array.isArray(parsedLayout.obstacles)) {
-          levelDataRef.current = parsedLayout;
-        }
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+        );
+        const landmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+            delegate: 'GPU',
+          },
+          outputFaceBlendshapes: true,
+          runningMode: 'VIDEO',
+          numFaces: 1,
+        });
+        setFaceLandmarker(landmarker);
       } catch (error) {
-        console.error("Failed to parse level layout, using fallback:", error);
+        console.error('Error creating FaceLandmarker:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Face Landmarker Error',
+          description: 'Could not initialize face detection. Please refresh the page.',
+        });
+      }
+    };
+    createFaceLandmarker();
+  }, [toast]);
+
+  const handleJump = useCallback(() => {
+    if (gameState === 'playing') {
+      setBirdVelocity(JUMP_STRENGTH);
+    }
+  }, [gameState]);
+
+  const predictWebcam = useCallback(() => {
+    if (!faceLandmarker || !webcamRef.current || !webcamRef.current.video) {
+      return;
+    }
+
+    const video = webcamRef.current.video;
+    if (video.readyState < 2) {
+      return;
+    }
+
+    if (lastVideoTimeRef.current === video.currentTime) {
+      return;
+    }
+    lastVideoTimeRef.current = video.currentTime;
+
+    const results = faceLandmarker.detectForVideo(video, Date.now());
+
+    if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+      const mouthOpenAmount = results.faceBlendshapes[0].categories.find(
+        (shape) => shape.categoryName === 'mouthOpen'
+      )?.score;
+
+      if (mouthOpenAmount && mouthOpenAmount > MOUTH_OPEN_THRESHOLD) {
+        handleJump();
       }
     }
-    
-    const initialObstacles: Obstacle[] = [];
-    let currentX = width;
-    for (let i = 0; i < 5; i++) {
-      const pattern = levelDataRef.current.obstacles[obstacleCursorRef.current];
-      const gap = OBSTACLE_GAP_BASE - (form.getValues('difficulty') === 'hard' ? 50 : form.getValues('difficulty') === 'medium' ? 25 : 0);
-      initialObstacles.push({
-        x: currentX,
-        topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
-        gap: gap,
-      });
-      currentX += pattern?.spacing || 350;
-      if (levelDataRef.current.obstacles.length > 0) {
-        obstacleCursorRef.current = (obstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+  }, [faceLandmarker, handleJump]);
+
+  const resetGame = useCallback(
+    (layout: GenerateLevelOutput | null) => {
+      const height = gameContainerRef.current?.clientHeight || window.innerHeight;
+      const width = gameContainerRef.current?.clientWidth || window.innerWidth;
+
+      setGameState('playing');
+      setBirdPosition(height / 2);
+      setBirdVelocity(0);
+      setScore(0);
+
+      levelDataRef.current = { obstacles: [] };
+      obstacleCursorRef.current = 0;
+
+      if (layout) {
+        try {
+          const parsedLayout = JSON.parse(layout.levelLayout);
+          if (parsedLayout.obstacles && Array.isArray(parsedLayout.obstacles)) {
+            levelDataRef.current = parsedLayout;
+          }
+        } catch (error) {
+          console.error('Failed to parse level layout, using fallback:', error);
+        }
       }
-    }
-    setObstacles(initialObstacles);
-  }, [form]);
+
+      const initialObstacles: Obstacle[] = [];
+      let currentX = width;
+      for (let i = 0; i < 5; i++) {
+        const pattern = levelDataRef.current.obstacles[obstacleCursorRef.current];
+        const gap =
+          OBSTACLE_GAP_BASE -
+          (form.getValues('difficulty') === 'hard'
+            ? 50
+            : form.getValues('difficulty') === 'medium'
+            ? 25
+            : 0);
+        initialObstacles.push({
+          x: currentX,
+          topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
+          gap: gap,
+        });
+        currentX += pattern?.spacing || 350;
+        if (levelDataRef.current.obstacles.length > 0) {
+          obstacleCursorRef.current =
+            (obstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+        }
+      }
+      setObstacles(initialObstacles);
+    },
+    [form]
+  );
 
   const gameLoop = useCallback(() => {
     const height = gameContainerRef.current?.clientHeight || window.innerHeight;
     const width = gameContainerRef.current?.clientWidth || window.innerWidth;
 
-    setBirdVelocity(v => v + GRAVITY);
-    setBirdPosition(p => p + birdVelocity);
+    predictWebcam();
+
+    setBirdVelocity((v) => v + GRAVITY);
+    setBirdPosition((p) => p + birdVelocity);
 
     let passedObstacle = false;
-    let newObstacles = obstacles.map(obstacle => ({
+    let newObstacles = obstacles.map((obstacle) => ({
       ...obstacle,
-      x: obstacle.x - OBSTACLE_SPEED
+      x: obstacle.x - OBSTACLE_SPEED,
     }));
 
     const lastObstacle = newObstacles[newObstacles.length - 1];
     if (lastObstacle && lastObstacle.x < width) {
-        const pattern = levelDataRef.current.obstacles[obstacleCursorRef.current];
-        const gap = OBSTACLE_GAP_BASE - (form.getValues('difficulty') === 'hard' ? 50 : form.getValues('difficulty') === 'medium' ? 25 : 0);
-        newObstacles.push({
-            x: lastObstacle.x + (pattern?.spacing || 350),
-            topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
-            gap: gap,
-        });
-        if (levelDataRef.current.obstacles.length > 0) {
-          obstacleCursorRef.current = (obstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
-        }
+      const pattern = levelDataRef.current.obstacles[obstacleCursorRef.current];
+      const gap =
+        OBSTACLE_GAP_BASE -
+        (form.getValues('difficulty') === 'hard'
+          ? 50
+          : form.getValues('difficulty') === 'medium'
+          ? 25
+          : 0);
+      newObstacles.push({
+        x: lastObstacle.x + (pattern?.spacing || 350),
+        topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
+        gap: gap,
+      });
+      if (levelDataRef.current.obstacles.length > 0) {
+        obstacleCursorRef.current =
+          (obstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+      }
     }
 
-    newObstacles = newObstacles.filter(o => o.x > -OBSTACLE_WIDTH);
+    newObstacles = newObstacles.filter((o) => o.x > -OBSTACLE_WIDTH);
     setObstacles(newObstacles);
 
-    const activeObstacle = newObstacles.find(o => o.x + OBSTACLE_WIDTH > BIRD_X_POSITION && o.x < BIRD_X_POSITION + BIRD_SIZE);
+    const activeObstacle = newObstacles.find(
+      (o) => o.x + OBSTACLE_WIDTH > BIRD_X_POSITION && o.x < BIRD_X_POSITION + BIRD_SIZE
+    );
     if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + OBSTACLE_SPEED) {
-        passedObstacle = true;
+      passedObstacle = true;
     }
     if (passedObstacle) {
-      setScore(s => s + 1);
+      setScore((s) => s + 1);
     }
 
     if (birdPosition > height - BIRD_SIZE || birdPosition < 0) {
@@ -150,14 +243,17 @@ export default function SoarScapePage() {
     }
 
     if (activeObstacle) {
-      if (birdPosition < activeObstacle.topHeight || birdPosition + BIRD_SIZE > activeObstacle.topHeight + activeObstacle.gap) {
+      if (
+        birdPosition < activeObstacle.topHeight ||
+        birdPosition + BIRD_SIZE > activeObstacle.topHeight + activeObstacle.gap
+      ) {
         setGameState('gameOver');
       }
     }
 
     gameLoopRef.current = requestAnimationFrame(gameLoop);
-  }, [birdVelocity, obstacles, form]);
-  
+  }, [birdVelocity, obstacles, form, predictWebcam]);
+
   useEffect(() => {
     if (gameState === 'playing') {
       gameLoopRef.current = requestAnimationFrame(gameLoop);
@@ -168,12 +264,6 @@ export default function SoarScapePage() {
       }
     };
   }, [gameState, gameLoop]);
-
-  const handleJump = useCallback(() => {
-    if (gameState === 'playing') {
-      setBirdVelocity(JUMP_STRENGTH);
-    }
-  }, [gameState]);
 
   const onSubmit = async (values: FormValues) => {
     setIsGenerating(true);
@@ -187,7 +277,7 @@ export default function SoarScapePage() {
       setIsGenerating(false);
     }
   };
-  
+
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.key === ' ') {
@@ -196,11 +286,32 @@ export default function SoarScapePage() {
       }
     };
     window.addEventListener('keydown', handleKeyPress);
+    const mainElement = gameContainerRef.current;
+    if (mainElement) {
+      mainElement.addEventListener('click', handleJump);
+    }
     return () => {
       window.removeEventListener('keydown', handleKeyPress);
+      if (mainElement) {
+        mainElement.removeEventListener('click', handleJump);
+      }
     };
   }, [handleJump]);
   
+  const onUserMedia = () => {
+    setHasCameraPermission(true);
+  };
+  
+  const onUserMediaError = (error: string | DOMException) => {
+    console.error('Webcam error:', error);
+    setHasCameraPermission(false);
+    toast({
+      variant: 'destructive',
+      title: 'Camera Access Denied',
+      description: 'Please enable camera permissions to use face controls.',
+    });
+  };
+
   const renderStartScreen = () => (
     <div className="flex items-center justify-center h-full bg-background/50 backdrop-blur-sm">
       <Card className="w-full max-w-md shadow-2xl">
@@ -211,6 +322,30 @@ export default function SoarScapePage() {
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <CardContent className="space-y-4">
+               <div className="rounded-lg overflow-hidden relative">
+                <Webcam
+                  ref={webcamRef}
+                  mirrored={true}
+                  onUserMedia={onUserMedia}
+                  onUserMediaError={onUserMediaError}
+                  className="w-full aspect-video"
+                  videoConstraints={{ facingMode: 'user' }}
+                />
+                {hasCameraPermission === false && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                        <Alert variant="destructive" className="w-auto">
+                            <AlertTitle>Camera Access Required</AlertTitle>
+                            <AlertDescription>Please allow camera access.</AlertDescription>
+                        </Alert>
+                    </div>
+                )}
+                {hasCameraPermission === undefined && (
+                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                        <p>Waiting for camera...</p>
+                    </div>
+                )}
+              </div>
+
               <FormField
                 control={form.control} name="difficulty"
                 render={({ field }) => (
@@ -252,9 +387,9 @@ export default function SoarScapePage() {
               />
             </CardContent>
             <CardFooter>
-              <Button type="submit" className="w-full" disabled={isGenerating}>
+              <Button type="submit" className="w-full" disabled={isGenerating || !faceLandmarker || hasCameraPermission !== true}>
                 {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isGenerating ? 'Generating Level...' : 'Start Game'}
+                {isGenerating ? 'Generating Level...' : !faceLandmarker ? 'Initializing...' : hasCameraPermission !== true ? 'Camera Required' : 'Start Game'}
               </Button>
             </CardFooter>
           </form>
@@ -264,7 +399,13 @@ export default function SoarScapePage() {
   );
 
   const renderGame = () => (
-    <div className="relative w-full h-full overflow-hidden" onClick={handleJump}>
+    <div className="relative w-full h-full overflow-hidden">
+        <Webcam
+            ref={webcamRef}
+            mirrored={true}
+            className="absolute top-4 right-4 w-48 h-36 rounded-md border-2 border-primary z-30 opacity-80"
+            videoConstraints={{ facingMode: 'user' }}
+        />
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-7xl font-bold text-primary-foreground/20 z-20 font-headline" style={{ textShadow: '2px 2px 0px hsl(var(--primary))' }}>
         {score}
       </div>
@@ -308,7 +449,7 @@ export default function SoarScapePage() {
   );
   
   return (
-    <main ref={gameContainerRef} className="w-screen h-screen overflow-hidden bg-background select-none cursor-pointer">
+    <main ref={gameContainerRef} className="w-screen h-screen overflow-hidden bg-background select-none">
       {gameState === 'playing' && renderGame()}
       {gameState === 'start' && renderStartScreen()}
       {gameState === 'gameOver' && renderGameOverScreen()}
