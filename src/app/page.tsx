@@ -11,11 +11,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Input } from '@/components/ui/input';
 import { Loader2 } from 'lucide-react';
 import { generateLevel } from '@/ai/flows/generate-level';
 import type { GenerateLevelOutput } from '@/ai/flows/generate-level';
 import { BirdIcon } from '@/components/icons/BirdIcon';
+import { DinoIcon } from '@/components/icons/DinoIcon';
+import { CactusIcon } from '@/components/icons/CactusIcon';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -25,14 +28,30 @@ const GRAVITY = 0.5;
 const JUMP_STRENGTH = -8;
 const OBSTACLE_WIDTH = 80;
 const OBSTACLE_GAP_BASE = 200;
-const OBSTACLE_SPEED = 4;
+const SOARSCAPE_OBSTACLE_SPEED = 4;
 const BIRD_X_POSITION = 150;
 const SMILE_THRESHOLD = 0.6;
+const BROW_RAISE_THRESHOLD = 0.4;
 
-type Obstacle = {
+const DINO_SIZE = 50;
+const DINO_Y_POSITION = 550;
+const DINO_GRAVITY = 0.6;
+const DINO_JUMP_STRENGTH = -15;
+const DINO_OBSTACLE_SPEED = 5;
+const CACTUS_WIDTH = 40;
+const CACTUS_HEIGHT = 80;
+
+
+type SoarScapeObstacle = {
   x: number;
   topHeight: number;
   gap: number;
+};
+
+type DinoObstacle = {
+  x: number;
+  width: number;
+  height: number;
 };
 
 type LevelData = {
@@ -40,8 +59,10 @@ type LevelData = {
 };
 
 type GameState = 'start' | 'playing' | 'gameOver';
+type GameMode = 'soarScape' | 'dino';
 
 const formSchema = z.object({
+  gameMode: z.enum(['soarScape', 'dino']),
   difficulty: z.enum(['easy', 'medium', 'hard']),
   style: z.string().min(2, 'Style must be at least 2 characters.'),
   theme: z.string().min(2, 'Theme must be at least 2 characters.'),
@@ -51,9 +72,18 @@ type FormValues = z.infer<typeof formSchema>;
 
 export default function SoarScapePage() {
   const [gameState, setGameState] = useState<GameState>('start');
+  const [gameMode, setGameMode] = useState<GameMode>('soarScape');
+  
+  // SoarScape state
   const [birdPosition, setBirdPosition] = useState(300);
   const [birdVelocity, setBirdVelocity] = useState(0);
-  const [obstacles, setObstacles] = useState<Obstacle[]>([]);
+  const [soarScapeObstacles, setSoarScapeObstacles] = useState<SoarScapeObstacle[]>([]);
+  
+  // Dino state
+  const [dinoPosition, setDinoPosition] = useState(DINO_Y_POSITION);
+  const [dinoVelocity, setDinoVelocity] = useState(0);
+  const [dinoObstacles, setDinoObstacles] = useState<DinoObstacle[]>([]);
+
   const [score, setScore] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
@@ -62,7 +92,7 @@ export default function SoarScapePage() {
   const gameLoopRef = useRef<number>();
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const levelDataRef = useRef<LevelData>({ obstacles: [] });
-  const obstacleCursorRef = useRef(0);
+  const soarScapeObstacleCursorRef = useRef(0);
   const webcamRef = useRef<Webcam>(null);
   const lastVideoTimeRef = useRef(-1);
   const { toast } = useToast();
@@ -70,12 +100,19 @@ export default function SoarScapePage() {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      gameMode: 'soarScape',
       difficulty: 'medium',
       style: 'futuristic',
       theme: 'space',
     },
   });
 
+  const selectedGameMode = form.watch('gameMode');
+
+  useEffect(() => {
+    setGameMode(selectedGameMode);
+  }, [selectedGameMode]);
+  
   useEffect(() => {
     const createFaceLandmarker = async () => {
       try {
@@ -105,10 +142,14 @@ export default function SoarScapePage() {
   }, [toast]);
 
   const handleJump = useCallback(() => {
-    if (gameState === 'playing') {
+    if (gameState !== 'playing') return;
+
+    if (gameMode === 'soarScape') {
       setBirdVelocity(JUMP_STRENGTH);
+    } else if (gameMode === 'dino' && dinoPosition >= DINO_Y_POSITION) {
+      setDinoVelocity(DINO_JUMP_STRENGTH);
     }
-  }, [gameState]);
+  }, [gameState, gameMode, dinoPosition]);
 
   const predictWebcam = useCallback(() => {
     if (!faceLandmarker || !webcamRef.current || !webcamRef.current.video) {
@@ -129,64 +170,78 @@ export default function SoarScapePage() {
 
     if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
       const blendshapes = results.faceBlendshapes[0].categories;
-      const smileLeft = blendshapes.find((shape) => shape.categoryName === 'mouthSmileLeft')?.score ?? 0;
-      const smileRight = blendshapes.find((shape) => shape.categoryName === 'mouthSmileRight')?.score ?? 0;
-
-      if (smileLeft > SMILE_THRESHOLD || smileRight > SMILE_THRESHOLD) {
-        handleJump();
+      
+      if(gameMode === 'soarScape') {
+        const smileLeft = blendshapes.find((shape) => shape.categoryName === 'mouthSmileLeft')?.score ?? 0;
+        const smileRight = blendshapes.find((shape) => shape.categoryName === 'mouthSmileRight')?.score ?? 0;
+        if (smileLeft > SMILE_THRESHOLD || smileRight > SMILE_THRESHOLD) {
+          handleJump();
+        }
+      } else if (gameMode === 'dino') {
+        const browRaise = blendshapes.find((shape) => shape.categoryName === 'browInnerUp')?.score ?? 0;
+        if (browRaise > BROW_RAISE_THRESHOLD) {
+          handleJump();
+        }
       }
     }
-  }, [faceLandmarker, handleJump]);
+  }, [faceLandmarker, handleJump, gameMode]);
 
   const resetGame = useCallback(
     (layout: GenerateLevelOutput | null) => {
       const height = gameContainerRef.current?.clientHeight || window.innerHeight;
       const width = gameContainerRef.current?.clientWidth || window.innerWidth;
-
+      
       setGameState('playing');
-      setBirdPosition(height / 2);
-      setBirdVelocity(0);
       setScore(0);
+      
+      if(gameMode === 'soarScape') {
+        setBirdPosition(height / 2);
+        setBirdVelocity(0);
 
-      levelDataRef.current = { obstacles: [] };
-      obstacleCursorRef.current = 0;
+        levelDataRef.current = { obstacles: [] };
+        soarScapeObstacleCursorRef.current = 0;
 
-      if (layout) {
-        try {
-          const parsedLayout = JSON.parse(layout.levelLayout);
-          if (parsedLayout.obstacles && Array.isArray(parsedLayout.obstacles)) {
-            levelDataRef.current = parsedLayout;
+        if (layout) {
+          try {
+            const parsedLayout = JSON.parse(layout.levelLayout);
+            if (parsedLayout.obstacles && Array.isArray(parsedLayout.obstacles)) {
+              levelDataRef.current = parsedLayout;
+            }
+          } catch (error) {
+            console.error('Failed to parse level layout, using fallback:', error);
           }
-        } catch (error) {
-          console.error('Failed to parse level layout, using fallback:', error);
         }
-      }
 
-      const initialObstacles: Obstacle[] = [];
-      let currentX = width;
-      for (let i = 0; i < 5; i++) {
-        const pattern = levelDataRef.current.obstacles[obstacleCursorRef.current];
-        const gap =
-          OBSTACLE_GAP_BASE -
-          (form.getValues('difficulty') === 'hard'
-            ? 50
-            : form.getValues('difficulty') === 'medium'
-            ? 25
-            : 0);
-        initialObstacles.push({
-          x: currentX,
-          topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
-          gap: gap,
-        });
-        currentX += pattern?.spacing || 350;
-        if (levelDataRef.current.obstacles.length > 0) {
-          obstacleCursorRef.current =
-            (obstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+        const initialObstacles: SoarScapeObstacle[] = [];
+        let currentX = width;
+        for (let i = 0; i < 5; i++) {
+          const pattern = levelDataRef.current.obstacles[soarScapeObstacleCursorRef.current];
+          const gap =
+            OBSTACLE_GAP_BASE -
+            (form.getValues('difficulty') === 'hard'
+              ? 50
+              : form.getValues('difficulty') === 'medium'
+              ? 25
+              : 0);
+          initialObstacles.push({
+            x: currentX,
+            topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
+            gap: gap,
+          });
+          currentX += pattern?.spacing || 350;
+          if (levelDataRef.current.obstacles.length > 0) {
+            soarScapeObstacleCursorRef.current =
+              (soarScapeObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+          }
         }
+        setSoarScapeObstacles(initialObstacles);
+      } else if (gameMode === 'dino') {
+        setDinoPosition(DINO_Y_POSITION);
+        setDinoVelocity(0);
+        setDinoObstacles([{x: width, width: CACTUS_WIDTH, height: CACTUS_HEIGHT}]);
       }
-      setObstacles(initialObstacles);
     },
-    [form]
+    [form, gameMode]
   );
 
   const gameLoop = useCallback(() => {
@@ -195,64 +250,91 @@ export default function SoarScapePage() {
 
     predictWebcam();
 
-    setBirdVelocity((v) => v + GRAVITY);
-    setBirdPosition((p) => p + birdVelocity);
+    if(gameMode === 'soarScape'){
+      setBirdVelocity((v) => v + GRAVITY);
+      setBirdPosition((p) => p + birdVelocity);
 
-    let passedObstacle = false;
-    let newObstacles = obstacles.map((obstacle) => ({
-      ...obstacle,
-      x: obstacle.x - OBSTACLE_SPEED,
-    }));
+      let passedObstacle = false;
+      let newObstacles = soarScapeObstacles.map((obstacle) => ({
+        ...obstacle,
+        x: obstacle.x - SOARSCAPE_OBSTACLE_SPEED,
+      }));
 
-    const lastObstacle = newObstacles[newObstacles.length - 1];
-    if (lastObstacle && lastObstacle.x < width) {
-      const pattern = levelDataRef.current.obstacles[obstacleCursorRef.current];
-      const gap =
-        OBSTACLE_GAP_BASE -
-        (form.getValues('difficulty') === 'hard'
-          ? 50
-          : form.getValues('difficulty') === 'medium'
-          ? 25
-          : 0);
-      newObstacles.push({
-        x: lastObstacle.x + (pattern?.spacing || 350),
-        topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
-        gap: gap,
-      });
-      if (levelDataRef.current.obstacles.length > 0) {
-        obstacleCursorRef.current =
-          (obstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+      const lastObstacle = newObstacles[newObstacles.length - 1];
+      if (lastObstacle && lastObstacle.x < width) {
+        const pattern = levelDataRef.current.obstacles[soarScapeObstacleCursorRef.current];
+        const gap =
+          OBSTACLE_GAP_BASE -
+          (form.getValues('difficulty') === 'hard'
+            ? 50
+            : form.getValues('difficulty') === 'medium'
+            ? 25
+            : 0);
+        newObstacles.push({
+          x: lastObstacle.x + (pattern?.spacing || 350),
+          topHeight: pattern?.height || Math.random() * (height - gap - 100) + 50,
+          gap: gap,
+        });
+        if (levelDataRef.current.obstacles.length > 0) {
+          soarScapeObstacleCursorRef.current =
+            (soarScapeObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+        }
       }
-    }
 
-    newObstacles = newObstacles.filter((o) => o.x > -OBSTACLE_WIDTH);
-    setObstacles(newObstacles);
+      newObstacles = newObstacles.filter((o) => o.x > -OBSTACLE_WIDTH);
+      setSoarScapeObstacles(newObstacles);
 
-    const activeObstacle = newObstacles.find(
-      (o) => o.x + OBSTACLE_WIDTH > BIRD_X_POSITION && o.x < BIRD_X_POSITION + BIRD_SIZE
-    );
-    if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + OBSTACLE_SPEED) {
-      passedObstacle = true;
-    }
-    if (passedObstacle) {
-      setScore((s) => s + 1);
-    }
+      const activeObstacle = newObstacles.find(
+        (o) => o.x + OBSTACLE_WIDTH > BIRD_X_POSITION && o.x < BIRD_X_POSITION + BIRD_SIZE
+      );
+      if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + SOARSCAPE_OBSTACLE_SPEED) {
+        passedObstacle = true;
+      }
+      if (passedObstacle) {
+        setScore((s) => s + 1);
+      }
 
-    if (birdPosition > height - BIRD_SIZE || birdPosition < 0) {
-      setGameState('gameOver');
-    }
-
-    if (activeObstacle) {
-      if (
-        birdPosition < activeObstacle.topHeight ||
-        birdPosition + BIRD_SIZE > activeObstacle.topHeight + activeObstacle.gap
-      ) {
+      if (birdPosition > height - BIRD_SIZE || birdPosition < 0) {
         setGameState('gameOver');
       }
+
+      if (activeObstacle) {
+        if (
+          birdPosition < activeObstacle.topHeight ||
+          birdPosition + BIRD_SIZE > activeObstacle.topHeight + activeObstacle.gap
+        ) {
+          setGameState('gameOver');
+        }
+      }
+    } else if (gameMode === 'dino'){
+        setDinoVelocity((v) => v + DINO_GRAVITY);
+        setDinoPosition((p) => Math.min(p + dinoVelocity, DINO_Y_POSITION));
+
+        let newObstacles = dinoObstacles.map(o => ({...o, x: o.x - DINO_OBSTACLE_SPEED}));
+
+        const lastObstacle = newObstacles[newObstacles.length - 1];
+        if(lastObstacle && lastObstacle.x < width - 300 - Math.random() * 400){
+            newObstacles.push({x: width, width: CACTUS_WIDTH, height: CACTUS_HEIGHT });
+        }
+
+        newObstacles = newObstacles.filter(o => o.x > -o.width);
+        setDinoObstacles(newObstacles);
+        setScore(s => s + 1);
+
+        const dinoX = width / 4;
+        const activeObstacle = newObstacles.find(
+          (o) => o.x < dinoX + DINO_SIZE && o.x + o.width > dinoX
+        );
+        
+        if (activeObstacle) {
+          if (dinoPosition + DINO_SIZE > height - activeObstacle.height) {
+            setGameState('gameOver');
+          }
+        }
     }
 
     gameLoopRef.current = requestAnimationFrame(gameLoop);
-  }, [birdVelocity, obstacles, form, predictWebcam]);
+  }, [birdVelocity, soarScapeObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode]);
 
   useEffect(() => {
     if (gameState === 'playing') {
@@ -267,13 +349,19 @@ export default function SoarScapePage() {
 
   const onSubmit = async (values: FormValues) => {
     setIsGenerating(true);
-    try {
-      const result = await generateLevel(values);
-      resetGame(result);
-    } catch (error) {
-      console.error('Failed to generate level:', error);
+    setGameMode(values.gameMode);
+    if(values.gameMode === 'soarScape'){
+      try {
+        const result = await generateLevel(values);
+        resetGame(result);
+      } catch (error) {
+        console.error('Failed to generate level:', error);
+        resetGame(null);
+      } finally {
+        setIsGenerating(false);
+      }
+    } else {
       resetGame(null);
-    } finally {
       setIsGenerating(false);
     }
   };
@@ -317,7 +405,7 @@ export default function SoarScapePage() {
       <Card className="w-full max-w-md shadow-2xl">
         <CardHeader>
           <CardTitle className="text-4xl font-bold text-center font-headline text-primary">SoarScape</CardTitle>
-          <CardDescription className="text-center">Configure your flight and start the adventure!</CardDescription>
+          <CardDescription className="text-center">Configure your adventure and start playing!</CardDescription>
         </CardHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -347,44 +435,83 @@ export default function SoarScapePage() {
               </div>
 
               <FormField
-                control={form.control} name="difficulty"
+                control={form.control}
+                name="gameMode"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Difficulty</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select a difficulty" /></SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="easy">Easy</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="hard">Hard</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <FormItem className="space-y-3">
+                    <FormLabel>Game Mode</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        className="flex flex-col space-y-1"
+                      >
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="soarScape" />
+                          </FormControl>
+                          <FormLabel className="font-normal">
+                           SoarScape (Smile to Jump)
+                          </FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="dino" />
+                          </FormControl>
+                          <FormLabel className="font-normal">
+                            Dino Run (Raise Eyebrows to Jump)
+                          </FormLabel>
+                        </FormItem>
+                      </RadioGroup>
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control} name="style"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Visual Style</FormLabel>.
-                    <FormControl><Input placeholder="e.g., futuristic, fantasy, cartoon" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control} name="theme"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Level Theme</FormLabel>
-                    <FormControl><Input placeholder="e.g., underwater, space, jungle" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+
+              {form.watch('gameMode') === 'soarScape' && (
+                <>
+                  <FormField
+                    control={form.control} name="difficulty"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Difficulty</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select a difficulty" /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="easy">Easy</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="hard">Hard</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control} name="style"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Visual Style</FormLabel>
+                        <FormControl><Input placeholder="e.g., futuristic, fantasy, cartoon" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control} name="theme"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Level Theme</FormLabel>
+                        <FormControl><Input placeholder="e.g., underwater, space, jungle" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
             </CardContent>
             <CardFooter>
               <Button type="submit" className="w-full" disabled={isGenerating || !faceLandmarker || hasCameraPermission !== true}>
@@ -407,26 +534,50 @@ export default function SoarScapePage() {
             videoConstraints={{ facingMode: 'user' }}
         />
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-7xl font-bold text-primary-foreground/20 z-20 font-headline" style={{ textShadow: '2px 2px 0px hsl(var(--primary))' }}>
-        {score}
+        {gameMode === 'soarScape' ? score : Math.floor(score / 10)}
       </div>
-      <BirdIcon
-        style={{
-          position: 'absolute',
-          left: BIRD_X_POSITION,
-          top: birdPosition,
-          width: BIRD_SIZE,
-          height: BIRD_SIZE,
-          transform: `rotate(${Math.min(Math.max(birdVelocity * 2, -20), 20)}deg)`,
-          transition: 'transform 0.1s linear',
-          zIndex: 10,
-        }}
-      />
-      {obstacles.map((obstacle, i) => (
-        <div key={i} className="absolute" style={{ left: obstacle.x, height: '100%' }}>
-          <div className="absolute bg-accent rounded-md" style={{ top: 0, width: OBSTACLE_WIDTH, height: obstacle.topHeight }} />
-          <div className="absolute bg-accent rounded-md" style={{ top: obstacle.topHeight + obstacle.gap, width: OBSTACLE_WIDTH, bottom: 0 }} />
-        </div>
-      ))}
+
+      {gameMode === 'soarScape' ? (
+        <>
+          <BirdIcon
+            style={{
+              position: 'absolute',
+              left: BIRD_X_POSITION,
+              top: birdPosition,
+              width: BIRD_SIZE,
+              height: BIRD_SIZE,
+              transform: `rotate(${Math.min(Math.max(birdVelocity * 2, -20), 20)}deg)`,
+              transition: 'transform 0.1s linear',
+              zIndex: 10,
+            }}
+          />
+          {soarScapeObstacles.map((obstacle, i) => (
+            <div key={i} className="absolute" style={{ left: obstacle.x, height: '100%' }}>
+              <div className="absolute bg-accent rounded-md" style={{ top: 0, width: OBSTACLE_WIDTH, height: obstacle.topHeight }} />
+              <div className="absolute bg-accent rounded-md" style={{ top: obstacle.topHeight + obstacle.gap, width: OBSTACLE_WIDTH, bottom: 0 }} />
+            </div>
+          ))}
+        </>
+      ) : (
+        <>
+          <DinoIcon
+            style={{
+              position: 'absolute',
+              left: '25%',
+              top: dinoPosition,
+              width: DINO_SIZE,
+              height: DINO_SIZE,
+              zIndex: 10,
+            }}
+          />
+          {dinoObstacles.map((obstacle, i) => (
+            <div key={i} className="absolute" style={{ left: obstacle.x, bottom: 0, width: obstacle.width, height: obstacle.height }}>
+              <CactusIcon className="w-full h-full" />
+            </div>
+          ))}
+           <div className="absolute bottom-0 left-0 w-full h-1/4 bg-background" />
+        </>
+      )}
     </div>
   );
 
@@ -438,7 +589,7 @@ export default function SoarScapePage() {
           <CardDescription>Your final score is:</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-8xl font-bold text-primary font-headline">{score}</p>
+          <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'soarScape' ? score : Math.floor(score/10)}</p>
         </CardContent>
         <CardFooter className="flex-col gap-2">
           <Button onClick={() => resetGame(null)} className="w-full">Restart with same settings</Button>
