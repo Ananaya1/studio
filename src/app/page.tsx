@@ -441,7 +441,7 @@ export default function JOYstickPage() {
                             <RadioGroupItem value="joystick" />
                           </FormControl>
                           <FormLabel className="font-normal">
-                           JOYstick (Smile to Jump)
+                           flappyhappy (Smile to Jump)
                           </FormLabel>
                         </FormItem>
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -449,7 +449,7 @@ export default function JOYstickPage() {
                             <RadioGroupItem value="dino" />
                           </FormControl>
                           <FormLabel className="font-normal">
-                            Dino Run (Raise Eyebrows to Jump)
+                            brow dino (Raise Eyebrows to Jump)
                           </FormLabel>
                         </FormItem>
                       </RadioGroup>
