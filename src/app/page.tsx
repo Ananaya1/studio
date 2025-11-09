@@ -372,7 +372,7 @@ export default function FlappyBirdPage() {
   };
 
   const renderStartScreen = () => (
-    <div className="flex items-center justify-center h-full bg-background/50 backdrop-blur-sm">
+    <div className="flex items-center justify-center h-full bg-background/80 backdrop-blur-sm">
       <Card className="w-full max-w-md shadow-2xl">
         <CardHeader>
           <CardTitle className="text-4xl font-bold text-center font-headline text-primary">Flappy Bird</CardTitle>
@@ -548,7 +548,7 @@ export default function FlappyBirdPage() {
   );
 
   const renderGameOverScreen = () => (
-    <div className="flex items-center justify-center h-full bg-background/50 backdrop-blur-sm">
+    <div className="flex items-center justify-center h-full bg-background/80 backdrop-blur-sm">
       <Card className="w-full max-w-sm text-center shadow-2xl">
         <CardHeader>
           <CardTitle className="text-4xl font-bold text-destructive">Game Over</CardTitle>
@@ -579,5 +579,3 @@ export default function FlappyBirdPage() {
     </main>
   );
 }
-
-    

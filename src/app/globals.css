@@ -8,7 +8,7 @@ body {
 
 @layer base {
   :root {
-    --background: 200 100% 85%; /* Light Blue */
+    --background: 0 0% 95%; /* Light Gray */
     --foreground: 224 76% 15%; /* Dark Blue for contrast */
 
     --card: 200 100% 90%;
@@ -52,8 +52,8 @@ body {
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
   .dark {
-    --background: 224 76% 10%; /* Dark Blue */
-    --foreground: 200 100% 85%; /* Light Blue */
+    --background: 0 0% 10%; /* Dark Gray */
+    --foreground: 0 0% 95%; /* Light Gray */
 
     --card: 224 76% 15%;
     --card-foreground: 200 100% 85%;
