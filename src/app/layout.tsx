@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'SoarScape',
+  title: 'Flappy Bird',
   description: 'A game like Flappy Bird, using AI for level generation.',
 };
 
@@ -26,3 +26,5 @@ export default function RootLayout({
     </html>
   );
 }
+
+    

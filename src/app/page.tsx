@@ -10,12 +10,8 @@ import Webcam from 'react-webcam';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Input } from '@/components/ui/input';
 import { Loader2 } from 'lucide-react';
-import { generateLevel } from '@/ai/flows/generate-level';
-import type { GenerateLevelOutput } from '@/ai/flows/generate-level';
 import { BirdIcon } from '@/components/icons/BirdIcon';
 import { DinoIcon } from '@/components/icons/DinoIcon';
 import { CactusIcon } from '@/components/icons/CactusIcon';
@@ -28,11 +24,10 @@ const GRAVITY = 0.5;
 const JUMP_STRENGTH = -8;
 const OBSTACLE_WIDTH = 80;
 const OBSTACLE_GAP_BASE = 200;
-const SOARSCAPE_OBSTACLE_SPEED = 4;
+const FLAPPYBIRD_OBSTACLE_SPEED = 4;
 const BIRD_X_POSITION = 150;
 const SMILE_THRESHOLD = 0.6;
 const BROW_RAISE_THRESHOLD = 0.4;
-const MOUTH_OPEN_THRESHOLD = 0.4;
 
 
 const DINO_SIZE = 50;
@@ -44,7 +39,7 @@ const CACTUS_WIDTH = 40;
 const CACTUS_HEIGHT = 80;
 
 
-type SoarScapeObstacle = {
+type FlappyBirdObstacle = {
   x: number;
   topHeight: number;
   gap: number;
@@ -61,23 +56,23 @@ type LevelData = {
 };
 
 type GameState = 'start' | 'playing' | 'gameOver';
-type GameMode = 'soarScape' | 'dino';
+type GameMode = 'flappyBird' | 'dino';
 
 const formSchema = z.object({
-  gameMode: z.enum(['soarScape', 'dino']),
+  gameMode: z.enum(['flappyBird', 'dino']),
   difficulty: z.enum(['easy', 'medium', 'hard']),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
-export default function SoarScapePage() {
+export default function FlappyBirdPage() {
   const [gameState, setGameState] = useState<GameState>('start');
-  const [gameMode, setGameMode] = useState<GameMode>('soarScape');
+  const [gameMode, setGameMode] = useState<GameMode>('flappyBird');
   
-  // SoarScape state
+  // Flappy Bird state
   const [birdPosition, setBirdPosition] = useState(300);
   const [birdVelocity, setBirdVelocity] = useState(0);
-  const [soarScapeObstacles, setSoarScapeObstacles] = useState<SoarScapeObstacle[]>([]);
+  const [flappyBirdObstacles, setFlappyBirdObstacles] = useState<FlappyBirdObstacle[]>([]);
   
   // Dino state
   const [dinoPosition, setDinoPosition] = useState(DINO_Y_POSITION);
@@ -93,18 +88,18 @@ export default function SoarScapePage() {
   const gameLoopRef = useRef<number>();
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const levelDataRef = useRef<LevelData>({ obstacles: [] });
-  const soarScapeObstacleCursorRef = useRef(0);
+  const flappyBirdObstacleCursorRef = useRef(0);
   const webcamRef = useRef<Webcam>(null);
   const lastVideoTimeRef = useRef(-1);
   const { toast } = useToast();
 
-  const [mouthOpen, setMouthOpen] = useState(0);
+  const [mouthSmile, setMouthSmile] = useState(0);
   const [browRaise, setBrowRaise] = useState(0);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      gameMode: 'soarScape',
+      gameMode: 'flappyBird',
       difficulty: 'medium',
     },
   });
@@ -152,7 +147,7 @@ export default function SoarScapePage() {
   const handleJump = useCallback(() => {
     if (gameState !== 'playing') return;
 
-    if (gameMode === 'soarScape') {
+    if (gameMode === 'flappyBird') {
       setBirdVelocity(JUMP_STRENGTH);
     } else if (gameMode === 'dino' && dinoPosition >= DINO_Y_POSITION) {
       setDinoVelocity(DINO_JUMP_STRENGTH);
@@ -175,14 +170,16 @@ export default function SoarScapePage() {
     if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
       const blendshapes = results.faceBlendshapes[0].categories;
       
-      const currentMouthOpen = blendshapes.find((shape) => shape.categoryName === 'jawOpen')?.score ?? 0;
+      const smileLeft = blendshapes.find((shape) => shape.categoryName === 'mouthSmileLeft')?.score ?? 0;
+      const smileRight = blendshapes.find((shape) => shape.categoryName === 'mouthSmileRight')?.score ?? 0;
+      const currentSmile = Math.max(smileLeft, smileRight);
       const currentBrowRaise = blendshapes.find((shape) => shape.categoryName === 'browInnerUp')?.score ?? 0;
 
-      setMouthOpen(currentMouthOpen);
+      setMouthSmile(currentSmile);
       setBrowRaise(currentBrowRaise);
       
-      if(gameMode === 'soarScape') {
-        if (currentMouthOpen > MOUTH_OPEN_THRESHOLD) {
+      if(gameMode === 'flappyBird') {
+        if (currentSmile > SMILE_THRESHOLD) {
           handleJump();
         }
       } else if (gameMode === 'dino') {
@@ -201,17 +198,17 @@ export default function SoarScapePage() {
       setGameState('playing');
       setScore(0);
       
-      if(gameMode === 'soarScape') {
+      if(gameMode === 'flappyBird') {
         setBirdPosition(height / 2);
         setBirdVelocity(0);
 
         levelDataRef.current = { obstacles: [] };
-        soarScapeObstacleCursorRef.current = 0;
+        flappyBirdObstacleCursorRef.current = 0;
 
-        const initialObstacles: SoarScapeObstacle[] = [];
+        const initialObstacles: FlappyBirdObstacle[] = [];
         let currentX = width;
         for (let i = 0; i < 5; i++) {
-          const pattern = levelDataRef.current.obstacles[soarScapeObstacleCursorRef.current];
+          const pattern = levelDataRef.current.obstacles[flappyBirdObstacleCursorRef.current];
           const gap =
             OBSTACLE_GAP_BASE -
             (form.getValues('difficulty') === 'hard'
@@ -226,11 +223,11 @@ export default function SoarScapePage() {
           });
           currentX += pattern?.spacing || 350;
           if (levelDataRef.current.obstacles.length > 0) {
-            soarScapeObstacleCursorRef.current =
-              (soarScapeObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+            flappyBirdObstacleCursorRef.current =
+              (flappyBirdObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
           }
         }
-        setSoarScapeObstacles(initialObstacles);
+        setFlappyBirdObstacles(initialObstacles);
       } else if (gameMode === 'dino') {
         setDinoPosition(DINO_Y_POSITION);
         setDinoVelocity(0);
@@ -242,7 +239,7 @@ export default function SoarScapePage() {
   
   const handleGameOver = useCallback(() => {
     setGameState('gameOver');
-    const finalScore = gameMode === 'soarScape' ? score : Math.floor(score / 10);
+    const finalScore = gameMode === 'flappyBird' ? score : Math.floor(score / 10);
     if (finalScore > bestScore) {
       setBestScore(finalScore);
       localStorage.setItem(`bestScore_${gameMode}`, finalScore.toString());
@@ -256,19 +253,19 @@ export default function SoarScapePage() {
 
     predictWebcam();
 
-    if(gameMode === 'soarScape'){
+    if(gameMode === 'flappyBird'){
       setBirdVelocity((v) => v + GRAVITY);
       setBirdPosition((p) => p + birdVelocity);
 
       let passedObstacle = false;
-      let newObstacles = soarScapeObstacles.map((obstacle) => ({
+      let newObstacles = flappyBirdObstacles.map((obstacle) => ({
         ...obstacle,
-        x: obstacle.x - SOARSCAPE_OBSTACLE_SPEED,
+        x: obstacle.x - FLAPPYBIRD_OBSTACLE_SPEED,
       }));
 
       const lastObstacle = newObstacles[newObstacles.length - 1];
       if (lastObstacle && lastObstacle.x < width) {
-        const pattern = levelDataRef.current.obstacles[soarScapeObstacleCursorRef.current];
+        const pattern = levelDataRef.current.obstacles[flappyBirdObstacleCursorRef.current];
         const gap =
           OBSTACLE_GAP_BASE -
           (form.getValues('difficulty') === 'hard'
@@ -282,18 +279,18 @@ export default function SoarScapePage() {
           gap: gap,
         });
         if (levelDataRef.current.obstacles.length > 0) {
-          soarScapeObstacleCursorRef.current =
-            (soarScapeObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+          flappyBirdObstacleCursorRef.current =
+            (flappyBirdObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
         }
       }
 
       newObstacles = newObstacles.filter((o) => o.x > -OBSTACLE_WIDTH);
-      setSoarScapeObstacles(newObstacles);
+      setFlappyBirdObstacles(newObstacles);
 
       const activeObstacle = newObstacles.find(
         (o) => o.x + OBSTACLE_WIDTH > BIRD_X_POSITION && o.x < BIRD_X_POSITION + BIRD_SIZE
       );
-      if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + SOARSCAPE_OBSTACLE_SPEED) {
+      if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + FLAPPYBIRD_OBSTACLE_SPEED) {
         passedObstacle = true;
       }
       if (passedObstacle) {
@@ -340,7 +337,7 @@ export default function SoarScapePage() {
     }
 
     gameLoopRef.current = requestAnimationFrame(gameLoop);
-  }, [birdVelocity, soarScapeObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode, handleGameOver]);
+  }, [birdVelocity, flappyBirdObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode, handleGameOver]);
 
   useEffect(() => {
     if (gameState === 'playing') {
@@ -360,18 +357,6 @@ export default function SoarScapePage() {
     setIsGenerating(false);
   };
   
-  useEffect(() => {
-    const mainElement = gameContainerRef.current;
-    if (mainElement) {
-      mainElement.addEventListener('click', handleJump);
-    }
-    return () => {
-      if (mainElement) {
-        mainElement.removeEventListener('click', handleJump);
-      }
-    };
-  }, [handleJump]);
-  
   const onUserMedia = () => {
     setHasCameraPermission(true);
   };
@@ -390,7 +375,7 @@ export default function SoarScapePage() {
     <div className="flex items-center justify-center h-full bg-background/50 backdrop-blur-sm">
       <Card className="w-full max-w-md shadow-2xl">
         <CardHeader>
-          <CardTitle className="text-4xl font-bold text-center font-headline text-primary">SoarScape</CardTitle>
+          <CardTitle className="text-4xl font-bold text-center font-headline text-primary">Flappy Bird</CardTitle>
           <CardDescription className="text-center">Configure your adventure and start playing!</CardDescription>
         </CardHeader>
         <Form {...form}>
@@ -434,10 +419,10 @@ export default function SoarScapePage() {
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
                           <FormControl>
-                            <RadioGroupItem value="soarScape" />
+                            <RadioGroupItem value="flappyBird" />
                           </FormControl>
                           <FormLabel className="font-normal">
-                           SoarScape (Open Mouth to Jump)
+                           Flappy Bird (Smile to Jump)
                           </FormLabel>
                         </FormItem>
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -460,16 +445,30 @@ export default function SoarScapePage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Difficulty</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select a difficulty" /></SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="easy">Easy</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="hard">Hard</SelectItem>
-                      </SelectContent>
-                    </Select>
+                     <RadioGroup
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        className="flex space-x-2"
+                      >
+                        <FormItem className="flex items-center space-x-1 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="easy" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Easy</FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-1 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="medium" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Medium</FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-1 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="hard" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Hard</FormLabel>
+                        </FormItem>
+                      </RadioGroup>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -496,15 +495,15 @@ export default function SoarScapePage() {
         videoConstraints={{ facingMode: 'user' }}
       />
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-7xl font-bold text-primary-foreground/20 z-20 font-headline" style={{ textShadow: '2px 2px 0px hsl(var(--primary))' }}>
-        {gameMode === 'soarScape' ? score : Math.floor(score / 10)}
+        {gameMode === 'flappyBird' ? score : Math.floor(score / 10)}
       </div>
 
       <div className="absolute top-4 left-4 z-40 bg-background/50 p-2 rounded-md text-xs">
-          <p>Mouth Open: {mouthOpen.toFixed(2)}</p>
+          <p>Smile: {mouthSmile.toFixed(2)}</p>
           <p>Brow Raise: {browRaise.toFixed(2)}</p>
       </div>
 
-      {gameMode === 'soarScape' ? (
+      {gameMode === 'flappyBird' ? (
         <>
           <BirdIcon
             style={{
@@ -518,7 +517,7 @@ export default function SoarScapePage() {
               zIndex: 10,
             }}
           />
-          {soarScapeObstacles.map((obstacle, i) => (
+          {flappyBirdObstacles.map((obstacle, i) => (
             <div key={i} className="absolute" style={{ left: obstacle.x, height: '100%', zIndex: 5 }}>
               <div className="absolute bg-accent rounded-md" style={{ top: 0, width: OBSTACLE_WIDTH, height: obstacle.topHeight }} />
               <div className="absolute bg-accent rounded-md" style={{ top: obstacle.topHeight + obstacle.gap, width: OBSTACLE_WIDTH, bottom: 0 }} />
@@ -557,7 +556,7 @@ export default function SoarScapePage() {
         <CardContent className="space-y-4">
           <div>
             <CardDescription>Your final score is:</CardDescription>
-            <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'soarScape' ? score : Math.floor(score/10)}</p>
+            <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'flappyBird' ? score : Math.floor(score/10)}</p>
           </div>
           <div>
             <CardDescription>Best Score:</CardDescription>
@@ -580,3 +579,5 @@ export default function SoarScapePage() {
     </main>
   );
 }
+
+    
