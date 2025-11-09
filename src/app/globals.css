@@ -11,7 +11,7 @@ body {
     --background: 0 0% 95%; /* Light Gray */
     --foreground: 224 76% 15%; /* Dark Blue for contrast */
 
-    --card: 48 83% 90%; /* Cream */
+    --card: 40 93% 94%; /* #FEF3E2 */
     --card-foreground: 224 76% 15%;
 
     --popover: 200 100% 90%;
@@ -55,8 +55,8 @@ body {
     --background: 0 0% 10%; /* Dark Gray */
     --foreground: 0 0% 95%; /* Light Gray */
 
-    --card: 48 33% 20%; /* Dark Cream */
-    --card-foreground: 48 83% 90%;
+    --card: 40 33% 25%; /* Darker #FEF3E2 */
+    --card-foreground: 40 93% 94%;
 
     --popover: 224 76% 15%;
     --popover-foreground: 200 100% 85%;
