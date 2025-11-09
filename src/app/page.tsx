@@ -24,7 +24,7 @@ const GRAVITY = 0.5;
 const JUMP_STRENGTH = -8;
 const OBSTACLE_WIDTH = 80;
 const OBSTACLE_GAP_BASE = 200;
-const FLAPPYBIRD_OBSTACLE_SPEED = 4;
+const JOYSTICK_OBSTACLE_SPEED = 4;
 const BIRD_X_POSITION = 150;
 const SMILE_THRESHOLD = 0.6;
 const BROW_RAISE_THRESHOLD = 0.4;
@@ -39,7 +39,7 @@ const CACTUS_WIDTH = 40;
 const CACTUS_HEIGHT = 80;
 
 
-type FlappyBirdObstacle = {
+type JOYstickObstacle = {
   x: number;
   topHeight: number;
   gap: number;
@@ -56,23 +56,23 @@ type LevelData = {
 };
 
 type GameState = 'start' | 'playing' | 'gameOver';
-type GameMode = 'flappyBird' | 'dino';
+type GameMode = 'joystick' | 'dino';
 
 const formSchema = z.object({
-  gameMode: z.enum(['flappyBird', 'dino']),
+  gameMode: z.enum(['joystick', 'dino']),
   difficulty: z.enum(['easy', 'medium', 'hard']),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
-export default function FlappyBirdPage() {
+export default function JOYstickPage() {
   const [gameState, setGameState] = useState<GameState>('start');
-  const [gameMode, setGameMode] = useState<GameMode>('flappyBird');
+  const [gameMode, setGameMode] = useState<GameMode>('joystick');
   
-  // Flappy Bird state
+  // JOYstick state
   const [birdPosition, setBirdPosition] = useState(300);
   const [birdVelocity, setBirdVelocity] = useState(0);
-  const [flappyBirdObstacles, setFlappyBirdObstacles] = useState<FlappyBirdObstacle[]>([]);
+  const [joystickObstacles, setJOYstickObstacles] = useState<JOYstickObstacle[]>([]);
   
   // Dino state
   const [dinoPosition, setDinoPosition] = useState(DINO_Y_POSITION);
@@ -88,7 +88,7 @@ export default function FlappyBirdPage() {
   const gameLoopRef = useRef<number>();
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const levelDataRef = useRef<LevelData>({ obstacles: [] });
-  const flappyBirdObstacleCursorRef = useRef(0);
+  const joystickObstacleCursorRef = useRef(0);
   const webcamRef = useRef<Webcam>(null);
   const lastVideoTimeRef = useRef(-1);
   const { toast } = useToast();
@@ -103,7 +103,7 @@ export default function FlappyBirdPage() {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      gameMode: 'flappyBird',
+      gameMode: 'joystick',
       difficulty: 'medium',
     },
   });
@@ -162,7 +162,7 @@ export default function FlappyBirdPage() {
       jumpSoundRef.current.play();
     }
 
-    if (gameMode === 'flappyBird') {
+    if (gameMode === 'joystick') {
       setBirdVelocity(JUMP_STRENGTH);
     } else if (gameMode === 'dino' && dinoPosition >= DINO_Y_POSITION) {
       setDinoVelocity(DINO_JUMP_STRENGTH);
@@ -193,7 +193,7 @@ export default function FlappyBirdPage() {
       setMouthSmile(currentSmile);
       setBrowRaise(currentBrowRaise);
       
-      if(gameMode === 'flappyBird') {
+      if(gameMode === 'joystick') {
         if (currentSmile > SMILE_THRESHOLD) {
           handleJump();
         }
@@ -213,17 +213,17 @@ export default function FlappyBirdPage() {
       setGameState('playing');
       setScore(0);
       
-      if(gameMode === 'flappyBird') {
+      if(gameMode === 'joystick') {
         setBirdPosition(height / 2);
         setBirdVelocity(0);
 
         levelDataRef.current = { obstacles: [] };
-        flappyBirdObstacleCursorRef.current = 0;
+        joystickObstacleCursorRef.current = 0;
 
-        const initialObstacles: FlappyBirdObstacle[] = [];
+        const initialObstacles: JOYstickObstacle[] = [];
         let currentX = width;
         for (let i = 0; i < 5; i++) {
-          const pattern = levelDataRef.current.obstacles[flappyBirdObstacleCursorRef.current];
+          const pattern = levelDataRef.current.obstacles[joystickObstacleCursorRef.current];
           const gap =
             OBSTACLE_GAP_BASE -
             (form.getValues('difficulty') === 'hard'
@@ -238,11 +238,11 @@ export default function FlappyBirdPage() {
           });
           currentX += pattern?.spacing || 350;
           if (levelDataRef.current.obstacles.length > 0) {
-            flappyBirdObstacleCursorRef.current =
-              (flappyBirdObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+            joystickObstacleCursorRef.current =
+              (joystickObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
           }
         }
-        setFlappyBirdObstacles(initialObstacles);
+        setJOYstickObstacles(initialObstacles);
       } else if (gameMode === 'dino') {
         setDinoPosition(DINO_Y_POSITION);
         setDinoVelocity(0);
@@ -258,7 +258,7 @@ export default function FlappyBirdPage() {
         gameOverSoundRef.current.play();
     }
     setGameState('gameOver');
-    const finalScore = gameMode === 'flappyBird' ? score : Math.floor(score / 10);
+    const finalScore = gameMode === 'joystick' ? score : Math.floor(score / 10);
     if (finalScore > bestScore) {
       setBestScore(finalScore);
       localStorage.setItem(`bestScore_${gameMode}`, finalScore.toString());
@@ -272,19 +272,19 @@ export default function FlappyBirdPage() {
 
     predictWebcam();
 
-    if(gameMode === 'flappyBird'){
+    if(gameMode === 'joystick'){
       setBirdVelocity((v) => v + GRAVITY);
       setBirdPosition((p) => p + birdVelocity);
 
       let passedObstacle = false;
-      let newObstacles = flappyBirdObstacles.map((obstacle) => ({
+      let newObstacles = joystickObstacles.map((obstacle) => ({
         ...obstacle,
-        x: obstacle.x - FLAPPYBIRD_OBSTACLE_SPEED,
+        x: obstacle.x - JOYSTICK_OBSTACLE_SPEED,
       }));
 
       const lastObstacle = newObstacles[newObstacles.length - 1];
       if (lastObstacle && lastObstacle.x < width) {
-        const pattern = levelDataRef.current.obstacles[flappyBirdObstacleCursorRef.current];
+        const pattern = levelDataRef.current.obstacles[joystickObstacleCursorRef.current];
         const gap =
           OBSTACLE_GAP_BASE -
           (form.getValues('difficulty') === 'hard'
@@ -298,18 +298,18 @@ export default function FlappyBirdPage() {
           gap: gap,
         });
         if (levelDataRef.current.obstacles.length > 0) {
-          flappyBirdObstacleCursorRef.current =
-            (flappyBirdObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
+          joystickObstacleCursorRef.current =
+            (joystickObstacleCursorRef.current + 1) % levelDataRef.current.obstacles.length;
         }
       }
 
       newObstacles = newObstacles.filter((o) => o.x > -OBSTACLE_WIDTH);
-      setFlappyBirdObstacles(newObstacles);
+      setJOYstickObstacles(newObstacles);
 
       const activeObstacle = newObstacles.find(
         (o) => o.x + OBSTACLE_WIDTH > BIRD_X_POSITION && o.x < BIRD_X_POSITION + BIRD_SIZE
       );
-      if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + FLAPPYBIRD_OBSTACLE_SPEED) {
+      if (activeObstacle && activeObstacle.x + OBSTACLE_WIDTH < BIRD_X_POSITION + JOYSTICK_OBSTACLE_SPEED) {
         passedObstacle = true;
       }
       if (passedObstacle) {
@@ -356,7 +356,7 @@ export default function FlappyBirdPage() {
     }
 
     gameLoopRef.current = requestAnimationFrame(gameLoop);
-  }, [birdVelocity, flappyBirdObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode, handleGameOver]);
+  }, [birdVelocity, joystickObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode, handleGameOver]);
 
   useEffect(() => {
     if (gameState === 'playing') {
@@ -394,7 +394,7 @@ export default function FlappyBirdPage() {
     <div className="flex items-center justify-center h-full bg-background/80 backdrop-blur-sm">
       <Card className="w-full max-w-md shadow-2xl">
         <CardHeader>
-          <CardTitle className="text-4xl font-bold text-center font-headline text-primary">Flappy Bird</CardTitle>
+          <CardTitle className="text-4xl font-bold text-center font-headline text-primary">JOYstick</CardTitle>
           <CardDescription className="text-center">Configure your adventure and start playing!</CardDescription>
         </CardHeader>
         <Form {...form}>
@@ -438,10 +438,10 @@ export default function FlappyBirdPage() {
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
                           <FormControl>
-                            <RadioGroupItem value="flappyBird" />
+                            <RadioGroupItem value="joystick" />
                           </FormControl>
                           <FormLabel className="font-normal">
-                           Flappy Bird (Smile to Jump)
+                           JOYstick (Smile to Jump)
                           </FormLabel>
                         </FormItem>
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -514,7 +514,7 @@ export default function FlappyBirdPage() {
         videoConstraints={{ facingMode: 'user' }}
       />
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-7xl font-bold text-primary-foreground/20 z-20 font-headline" style={{ textShadow: '2px 2px 0px hsl(var(--primary))' }}>
-        {gameMode === 'flappyBird' ? score : Math.floor(score / 10)}
+        {gameMode === 'joystick' ? score : Math.floor(score / 10)}
       </div>
 
       <div className="absolute top-4 left-4 z-40 bg-background/50 p-2 rounded-md text-xs">
@@ -522,7 +522,7 @@ export default function FlappyBirdPage() {
           <p>Brow Raise: {browRaise.toFixed(2)}</p>
       </div>
 
-      {gameMode === 'flappyBird' ? (
+      {gameMode === 'joystick' ? (
         <>
           <BirdIcon
             style={{
@@ -536,7 +536,7 @@ export default function FlappyBirdPage() {
               zIndex: 10,
             }}
           />
-          {flappyBirdObstacles.map((obstacle, i) => (
+          {joystickObstacles.map((obstacle, i) => (
             <div key={i} className="absolute" style={{ left: obstacle.x, height: '100%', zIndex: 5 }}>
               <div className="absolute bg-accent rounded-md" style={{ top: 0, width: OBSTACLE_WIDTH, height: obstacle.topHeight }} />
               <div className="absolute bg-accent rounded-md" style={{ top: obstacle.topHeight + obstacle.gap, width: OBSTACLE_WIDTH, bottom: 0 }} />
@@ -575,7 +575,7 @@ export default function FlappyBirdPage() {
         <CardContent className="space-y-4">
           <div>
             <CardDescription>Your final score is:</CardDescription>
-            <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'flappyBird' ? score : Math.floor(score/10)}</p>
+            <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'joystick' ? score : Math.floor(score/10)}</p>
           </div>
           <div>
             <CardDescription>Best Score:</CardDescription>

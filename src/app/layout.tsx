@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'Flappy Bird',
+  title: 'JOYstick',
   description: 'A game like Flappy Bird, using AI for level generation.',
 };
 
