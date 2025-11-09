@@ -552,7 +552,7 @@ export default function SoarScapePage() {
             }}
           />
           {soarScapeObstacles.map((obstacle, i) => (
-            <div key={i} className="absolute" style={{ left: obstacle.x, height: '100%' }}>
+            <div key={i} className="absolute" style={{ left: obstacle.x, height: '100%', zIndex: 5 }}>
               <div className="absolute bg-accent rounded-md" style={{ top: 0, width: OBSTACLE_WIDTH, height: obstacle.topHeight }} />
               <div className="absolute bg-accent rounded-md" style={{ top: obstacle.topHeight + obstacle.gap, width: OBSTACLE_WIDTH, bottom: 0 }} />
             </div>
@@ -571,11 +571,11 @@ export default function SoarScapePage() {
             }}
           />
           {dinoObstacles.map((obstacle, i) => (
-            <div key={i} className="absolute" style={{ left: obstacle.x, bottom: 0, width: obstacle.width, height: obstacle.height }}>
+            <div key={i} className="absolute" style={{ left: obstacle.x, bottom: 0, width: obstacle.width, height: obstacle.height, zIndex: 5 }}>
               <CactusIcon className="w-full h-full" />
             </div>
           ))}
-           <div className="absolute bottom-0 left-0 w-full h-1/4 bg-background" />
+           <div className="absolute bottom-0 left-0 w-full h-1/4 bg-background z-0" />
         </>
       )}
     </div>
