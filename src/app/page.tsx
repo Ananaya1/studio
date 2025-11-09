@@ -85,6 +85,7 @@ export default function SoarScapePage() {
   const [dinoObstacles, setDinoObstacles] = useState<DinoObstacle[]>([]);
 
   const [score, setScore] = useState(0);
+  const [bestScore, setBestScore] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | undefined>(undefined);
@@ -111,6 +112,12 @@ export default function SoarScapePage() {
 
   useEffect(() => {
     setGameMode(selectedGameMode);
+    const storedBestScore = localStorage.getItem(`bestScore_${selectedGameMode}`);
+    if (storedBestScore) {
+      setBestScore(parseInt(storedBestScore, 10));
+    } else {
+      setBestScore(0);
+    }
   }, [selectedGameMode]);
   
   useEffect(() => {
@@ -243,6 +250,16 @@ export default function SoarScapePage() {
     },
     [form, gameMode]
   );
+  
+  const handleGameOver = useCallback(() => {
+    setGameState('gameOver');
+    const finalScore = gameMode === 'soarScape' ? score : Math.floor(score / 10);
+    if (finalScore > bestScore) {
+      setBestScore(finalScore);
+      localStorage.setItem(`bestScore_${gameMode}`, finalScore.toString());
+    }
+  }, [score, bestScore, gameMode]);
+
 
   const gameLoop = useCallback(() => {
     const height = gameContainerRef.current?.clientHeight || window.innerHeight;
@@ -295,7 +312,7 @@ export default function SoarScapePage() {
       }
 
       if (birdPosition > height - BIRD_SIZE || birdPosition < 0) {
-        setGameState('gameOver');
+        handleGameOver();
       }
 
       if (activeObstacle) {
@@ -303,7 +320,7 @@ export default function SoarScapePage() {
           birdPosition < activeObstacle.topHeight ||
           birdPosition + BIRD_SIZE > activeObstacle.topHeight + activeObstacle.gap
         ) {
-          setGameState('gameOver');
+          handleGameOver();
         }
       }
     } else if (gameMode === 'dino'){
@@ -328,13 +345,13 @@ export default function SoarScapePage() {
         
         if (activeObstacle) {
           if (dinoPosition + DINO_SIZE > height - activeObstacle.height) {
-            setGameState('gameOver');
+            handleGameOver();
           }
         }
     }
 
     gameLoopRef.current = requestAnimationFrame(gameLoop);
-  }, [birdVelocity, soarScapeObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode]);
+  }, [birdVelocity, soarScapeObstacles, dinoVelocity, dinoObstacles, form, predictWebcam, gameMode, handleGameOver]);
 
   useEffect(() => {
     if (gameState === 'playing') {
@@ -586,10 +603,16 @@ export default function SoarScapePage() {
       <Card className="w-full max-w-sm text-center shadow-2xl">
         <CardHeader>
           <CardTitle className="text-4xl font-bold text-destructive">Game Over</CardTitle>
-          <CardDescription>Your final score is:</CardDescription>
         </CardHeader>
-        <CardContent>
-          <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'soarScape' ? score : Math.floor(score/10)}</p>
+        <CardContent className="space-y-4">
+          <div>
+            <CardDescription>Your final score is:</CardDescription>
+            <p className="text-8xl font-bold text-primary font-headline">{gameMode === 'soarScape' ? score : Math.floor(score/10)}</p>
+          </div>
+          <div>
+            <CardDescription>Best Score:</CardDescription>
+            <p className="text-4xl font-bold text-secondary-foreground">{bestScore}</p>
+          </div>
         </CardContent>
         <CardFooter className="flex-col gap-2">
           <Button onClick={() => resetGame(null)} className="w-full">Restart with same settings</Button>
