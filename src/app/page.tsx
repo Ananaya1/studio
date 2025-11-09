@@ -96,6 +96,10 @@ export default function FlappyBirdPage() {
   const [mouthSmile, setMouthSmile] = useState(0);
   const [browRaise, setBrowRaise] = useState(0);
 
+  const jumpSoundRef = useRef<HTMLAudioElement | null>(null);
+  const gameOverSoundRef = useRef<HTMLAudioElement | null>(null);
+
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -117,6 +121,12 @@ export default function FlappyBirdPage() {
   }, [selectedGameMode]);
   
   useEffect(() => {
+    // Initialize audio refs on client
+    jumpSoundRef.current = new Audio('https://cdn.freesound.org/previews/510/510163_10878949-lq.mp3');
+    gameOverSoundRef.current = new Audio('https://cdn.freesound.org/previews/243/243021_4263495-lq.mp3');
+    jumpSoundRef.current.volume = 0.5;
+    gameOverSoundRef.current.volume = 0.4;
+    
     const createFaceLandmarker = async () => {
       try {
         const vision = await FilesetResolver.forVisionTasks(
@@ -146,6 +156,11 @@ export default function FlappyBirdPage() {
 
   const handleJump = useCallback(() => {
     if (gameState !== 'playing') return;
+
+    if (jumpSoundRef.current) {
+      jumpSoundRef.current.currentTime = 0;
+      jumpSoundRef.current.play();
+    }
 
     if (gameMode === 'flappyBird') {
       setBirdVelocity(JUMP_STRENGTH);
@@ -238,6 +253,10 @@ export default function FlappyBirdPage() {
   );
   
   const handleGameOver = useCallback(() => {
+    if (gameOverSoundRef.current) {
+        gameOverSoundRef.current.currentTime = 0;
+        gameOverSoundRef.current.play();
+    }
     setGameState('gameOver');
     const finalScore = gameMode === 'flappyBird' ? score : Math.floor(score / 10);
     if (finalScore > bestScore) {
