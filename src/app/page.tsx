@@ -32,6 +32,8 @@ const SOARSCAPE_OBSTACLE_SPEED = 4;
 const BIRD_X_POSITION = 150;
 const SMILE_THRESHOLD = 0.6;
 const BROW_RAISE_THRESHOLD = 0.4;
+const MOUTH_OPEN_THRESHOLD = 0.4;
+
 
 const DINO_SIZE = 50;
 const DINO_Y_POSITION = 550;
@@ -64,8 +66,6 @@ type GameMode = 'soarScape' | 'dino';
 const formSchema = z.object({
   gameMode: z.enum(['soarScape', 'dino']),
   difficulty: z.enum(['easy', 'medium', 'hard']),
-  style: z.string().min(2, 'Style must be at least 2 characters.'),
-  theme: z.string().min(2, 'Theme must be at least 2 characters.'),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -98,13 +98,14 @@ export default function SoarScapePage() {
   const lastVideoTimeRef = useRef(-1);
   const { toast } = useToast();
 
+  const [mouthOpen, setMouthOpen] = useState(0);
+  const [browRaise, setBrowRaise] = useState(0);
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       gameMode: 'soarScape',
       difficulty: 'medium',
-      style: 'futuristic',
-      theme: 'space',
     },
   });
 
@@ -159,34 +160,33 @@ export default function SoarScapePage() {
   }, [gameState, gameMode, dinoPosition]);
 
   const predictWebcam = useCallback(() => {
-    if (!faceLandmarker || !webcamRef.current || !webcamRef.current.video) {
+    if (!faceLandmarker || !webcamRef.current || !webcamRef.current.video || webcamRef.current.video.readyState < 2) {
       return;
     }
-
+  
     const video = webcamRef.current.video;
-    if (video.readyState < 2) {
-      return;
-    }
-
     if (lastVideoTimeRef.current === video.currentTime) {
-      return;
+        return;
     }
     lastVideoTimeRef.current = video.currentTime;
-
+  
     const results = faceLandmarker.detectForVideo(video, Date.now());
-
+  
     if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
       const blendshapes = results.faceBlendshapes[0].categories;
       
+      const currentMouthOpen = blendshapes.find((shape) => shape.categoryName === 'jawOpen')?.score ?? 0;
+      const currentBrowRaise = blendshapes.find((shape) => shape.categoryName === 'browInnerUp')?.score ?? 0;
+
+      setMouthOpen(currentMouthOpen);
+      setBrowRaise(currentBrowRaise);
+      
       if(gameMode === 'soarScape') {
-        const smileLeft = blendshapes.find((shape) => shape.categoryName === 'mouthSmileLeft')?.score ?? 0;
-        const smileRight = blendshapes.find((shape) => shape.categoryName === 'mouthSmileRight')?.score ?? 0;
-        if (smileLeft > SMILE_THRESHOLD || smileRight > SMILE_THRESHOLD) {
+        if (currentMouthOpen > MOUTH_OPEN_THRESHOLD) {
           handleJump();
         }
       } else if (gameMode === 'dino') {
-        const browRaise = blendshapes.find((shape) => shape.categoryName === 'browInnerUp')?.score ?? 0;
-        if (browRaise > BROW_RAISE_THRESHOLD) {
+        if (currentBrowRaise > BROW_RAISE_THRESHOLD) {
           handleJump();
         }
       }
@@ -194,7 +194,7 @@ export default function SoarScapePage() {
   }, [faceLandmarker, handleJump, gameMode]);
 
   const resetGame = useCallback(
-    (layout: GenerateLevelOutput | null) => {
+    () => {
       const height = gameContainerRef.current?.clientHeight || window.innerHeight;
       const width = gameContainerRef.current?.clientWidth || window.innerWidth;
       
@@ -207,17 +207,6 @@ export default function SoarScapePage() {
 
         levelDataRef.current = { obstacles: [] };
         soarScapeObstacleCursorRef.current = 0;
-
-        if (layout) {
-          try {
-            const parsedLayout = JSON.parse(layout.levelLayout);
-            if (parsedLayout.obstacles && Array.isArray(parsedLayout.obstacles)) {
-              levelDataRef.current = parsedLayout;
-            }
-          } catch (error) {
-            console.error('Failed to parse level layout, using fallback:', error);
-          }
-        }
 
         const initialObstacles: SoarScapeObstacle[] = [];
         let currentX = width;
@@ -367,36 +356,16 @@ export default function SoarScapePage() {
   const onSubmit = async (values: FormValues) => {
     setIsGenerating(true);
     setGameMode(values.gameMode);
-    if(values.gameMode === 'soarScape'){
-      try {
-        const result = await generateLevel(values);
-        resetGame(result);
-      } catch (error) {
-        console.error('Failed to generate level:', error);
-        resetGame(null);
-      } finally {
-        setIsGenerating(false);
-      }
-    } else {
-      resetGame(null);
-      setIsGenerating(false);
-    }
+    resetGame();
+    setIsGenerating(false);
   };
-
+  
   useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.key === ' ') {
-        e.preventDefault();
-        handleJump();
-      }
-    };
-    window.addEventListener('keydown', handleKeyPress);
     const mainElement = gameContainerRef.current;
     if (mainElement) {
       mainElement.addEventListener('click', handleJump);
     }
     return () => {
-      window.removeEventListener('keydown', handleKeyPress);
       if (mainElement) {
         mainElement.removeEventListener('click', handleJump);
       }
@@ -468,7 +437,7 @@ export default function SoarScapePage() {
                             <RadioGroupItem value="soarScape" />
                           </FormControl>
                           <FormLabel className="font-normal">
-                           SoarScape (Smile to Jump)
+                           SoarScape (Open Mouth to Jump)
                           </FormLabel>
                         </FormItem>
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -486,49 +455,25 @@ export default function SoarScapePage() {
                 )}
               />
 
-              {form.watch('gameMode') === 'soarScape' && (
-                <>
-                  <FormField
-                    control={form.control} name="difficulty"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Difficulty</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger><SelectValue placeholder="Select a difficulty" /></SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="easy">Easy</SelectItem>
-                            <SelectItem value="medium">Medium</SelectItem>
-                            <SelectItem value="hard">Hard</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control} name="style"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Visual Style</FormLabel>
-                        <FormControl><Input placeholder="e.g., futuristic, fantasy, cartoon" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control} name="theme"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Level Theme</FormLabel>
-                        <FormControl><Input placeholder="e.g., underwater, space, jungle" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </>
-              )}
+              <FormField
+                control={form.control} name="difficulty"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Difficulty</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger><SelectValue placeholder="Select a difficulty" /></SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="easy">Easy</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="hard">Hard</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </CardContent>
             <CardFooter>
               <Button type="submit" className="w-full" disabled={isGenerating || !faceLandmarker || hasCameraPermission !== true}>
@@ -544,14 +489,19 @@ export default function SoarScapePage() {
 
   const renderGame = () => (
     <div className="relative w-full h-full overflow-hidden">
-        <Webcam
-            ref={webcamRef}
-            mirrored={true}
-            className="absolute top-4 right-4 w-48 h-36 rounded-md border-2 border-primary z-30 opacity-80"
-            videoConstraints={{ facingMode: 'user' }}
-        />
+      <Webcam
+        ref={webcamRef}
+        mirrored={true}
+        className="absolute top-4 right-4 w-48 h-36 rounded-md border-2 border-primary z-30 opacity-80"
+        videoConstraints={{ facingMode: 'user' }}
+      />
       <div className="absolute top-8 left-1/2 -translate-x-1/2 text-7xl font-bold text-primary-foreground/20 z-20 font-headline" style={{ textShadow: '2px 2px 0px hsl(var(--primary))' }}>
         {gameMode === 'soarScape' ? score : Math.floor(score / 10)}
+      </div>
+
+      <div className="absolute top-4 left-4 z-40 bg-background/50 p-2 rounded-md text-xs">
+          <p>Mouth Open: {mouthOpen.toFixed(2)}</p>
+          <p>Brow Raise: {browRaise.toFixed(2)}</p>
       </div>
 
       {gameMode === 'soarScape' ? (
@@ -615,7 +565,7 @@ export default function SoarScapePage() {
           </div>
         </CardContent>
         <CardFooter className="flex-col gap-2">
-          <Button onClick={() => resetGame(null)} className="w-full">Restart with same settings</Button>
+          <Button onClick={() => resetGame()} className="w-full">Restart with same settings</Button>
           <Button onClick={() => setGameState('start')} variant="outline" className="w-full">Back to Menu</Button>
         </CardFooter>
       </Card>

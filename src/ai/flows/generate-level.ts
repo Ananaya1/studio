@@ -13,8 +13,6 @@ import {z} from 'genkit';
 
 const GenerateLevelInputSchema = z.object({
   difficulty: z.string().describe('The difficulty level of the game (easy, medium, hard).'),
-  style: z.string().describe('The visual style of the game level (e.g., futuristic, fantasy, cartoon).'),
-  theme: z.string().describe('The theme of the game level (e.g., underwater, space, jungle).'),
 });
 export type GenerateLevelInput = z.infer<typeof GenerateLevelInputSchema>;
 
@@ -34,8 +32,6 @@ const generateLevelPrompt = ai.definePrompt({
   prompt: `You are a game level designer. Generate a level layout for a game with the following characteristics:
 
 Difficulty: {{{difficulty}}}
-Style: {{{style}}}
-Theme: {{{theme}}}
 
 Return the level layout as a JSON string. The level layout should include obstacle positions and spacing to ensure the game is playable and challenging. Make sure the JSON is a parseable string and use double quotes.
 
